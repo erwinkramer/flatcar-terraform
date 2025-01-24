@@ -3,40 +3,53 @@ version: 1.0.0
 
 storage:
   files:
-    - path: /opt/bin/test-service.sh
-      mode: 0755
+    # free up port 53
+    - path: /etc/systemd/resolved.conf
+      mode: 0644
+      overwrite: true
       contents:
         inline: |
-          #!/bin/bash
-          set -euo pipefail
-          if test ! -e /etc/config-side-effect; then
-            echo "my-setting v1" > /etc/config-side-effect
-          fi
-          mkdir -p /mydata
-          if test ! -e /mydata/data; then
-            echo "$RANDOM" > /mydata/data
-          fi
+          [Resolve]
+          DNSStubListener=no
+
+    - path: /opt/bin/docker-compose
+      contents:
+        source: https://github.com/docker/compose/releases/download/v2.11.2/docker-compose-linux-x86_64
+        verification:
+          hash: sha512-8ad55ea1234e206ecad3e8ecf30f93de5cc764a423bf8ff179b25320f148e475b569ab9ec68d90eacfe97269528ff8fef1746c05381c7d05edc85d2f2c245e69
+      mode: 0755
+
+    - path: /home/core/docker-compose.yml
+      contents:
+        inline: |
+          services:
+            web:
+              image: nginx
+              ports:
+                - 80:80
+            coredns:
+              image: coredns/coredns
+              ports:
+                - "53:53/udp"
+                - "53:53/tcp"
+      mode: 0644
+      user:
+        name: core
+      group:
+        name: core
+
 systemd:
   units:
-    - name: test.service
+    - name: application.service
       enabled: true
       contents: |
         [Unit]
-        Description=Test service with side-effect
+        Description=Minimalist docker-compose example
         [Service]
-        Type=oneshot
-        RemainAfterExit=true
-        Restart=on-failure
-        ExecStart=/opt/bin/test-service.sh
+        ExecStart=/opt/bin/docker-compose -f /home/core/docker-compose.yml up
         [Install]
         WantedBy=multi-user.target
-    - name: sshd.socket
-      dropins:
-      - name: 10-sshd-port.conf
-        contents: |
-          [Socket]
-          ListenStream=
-          ListenStream=${port}
+
 passwd:
   users:
     - name: core

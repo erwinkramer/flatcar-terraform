@@ -51,6 +51,48 @@ resource "azurerm_public_ip" "pip" {
   allocation_method   = "Dynamic"
 }
 
+resource "azurerm_network_security_group" "nsg" {
+  name                = "${var.cluster_name}-nsg"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+
+  security_rule {
+    name                       = "Allow-HTTP"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Allow-DNS"
+    priority                   = 105
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "53"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "Allow-SSH"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "*"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
 resource "azurerm_network_interface" "main" {
   for_each            = toset(var.machines)
   name                = "${var.cluster_name}-${each.key}-nic"
@@ -65,15 +107,19 @@ resource "azurerm_network_interface" "main" {
   }
 }
 
+resource "azurerm_network_interface_security_group_association" "example" {
+  for_each                  = toset(var.machines)
+  network_interface_id      = azurerm_network_interface.main[each.key].id
+  network_security_group_id = azurerm_network_security_group.nsg.id
+}
+
 resource "null_resource" "reboot-when-ignition-changes" {
   for_each = toset(var.machines)
   triggers = {
     ignition_config    = azurerm_linux_virtual_machine.machine[each.key].user_data
     reprovision_helper = data.template_file.reprovision[each.key].rendered
   }
-  # Wait for the new Ignition config object to be ready before rebooting
   depends_on = [azurerm_linux_virtual_machine.machine]
-  # Trigger running Ignition on the next reboot and reboot the instance
   provisioner "local-exec" {
     command = data.template_file.reprovision[each.key].rendered
   }
@@ -84,14 +130,12 @@ data "template_file" "reprovision" {
   template = file("${path.module}/reprovision-helper")
 
   vars = {
-    # Space separated list of regexes for data to keep when reconfiguring the instance with Ignition (quote with ' only, using " is not allowed)
     KEEPPATHS = "'/etc/ssh/ssh_host_.*' /mydata /var/log"
     RGROUP    = azurerm_resource_group.main.name
     NAME      = azurerm_linux_virtual_machine.machine[each.key].name
     PUBLICIP  = azurerm_linux_virtual_machine.machine[each.key].public_ip_address
     MODE      = var.mode
     PORT      = var.ssh_port
-    # Workaround because Azure still servers the outdated config for some time
     EXPECTED  = azurerm_linux_virtual_machine.machine[each.key].user_data
   }
 }
@@ -104,7 +148,6 @@ resource "azurerm_linux_virtual_machine" "machine" {
   size                = var.server_type
   admin_username      = "core"
 
-  # With user_data in-place updates are supported, for custom_data we would need a workaround to have the Ignition config point to a blob URL (config: replace: source: ...) for the real config
   user_data = base64encode(data.ct_config.machine-ignitions[each.key].rendered)
   network_interface_ids = [
     azurerm_network_interface.main[each.key].id,
@@ -118,12 +161,12 @@ resource "azurerm_linux_virtual_machine" "machine" {
   source_image_reference {
     publisher = "kinvolk"
     offer     = "flatcar-container-linux"
-    sku       = "alpha"
-    version   = var.flatcar_alpha_version
+    sku       = "stable"
+    version   = var.flatcar_stable_version
   }
 
   plan {
-    name      = "alpha"
+    name      = "stable"
     product   = "flatcar-container-linux"
     publisher = "kinvolk"
   }

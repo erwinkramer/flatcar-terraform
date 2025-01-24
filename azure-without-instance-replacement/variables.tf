@@ -25,9 +25,9 @@ variable "server_type" {
   default     = "Standard_D2s_v4"
 }
 
-variable "flatcar_alpha_version" {
+variable "flatcar_stable_version" {
   type        = string
-  description = "The Flatcar Alpha release you want to use for the initial installation, must be >= 3535.0.0"
+  description = "The Flatcar stable release you want to use for the initial installation, must be >= 3535.0.0"
 }
 
 variable "ssh_port" {
